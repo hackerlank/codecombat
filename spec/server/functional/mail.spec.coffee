@@ -67,3 +67,48 @@ describe 'sendNextStepsEmail', ->
 
     mail.sendNextStepsEmail(user, new Date, 5)
   .pend('Breaks other tests — must be run alone')
+
+describe 'POST /mail/webhook', ->
+  beforeEach utils.wrap (done) ->
+    @email = 'some@email.com'
+    @leid = 'german song?'
+    @user = yield utils.initUser({
+      @email
+      mailChimp: {
+        @leid
+        @email
+        euid: 'euid!'
+      }
+      emails: {
+        generalNews: { enabled: false }
+        diplomatNews: { enabled: true }
+      }
+    })
+    console.log 'user initially', @user
+    yield new Promise((resolve) -> setTimeout(resolve, 100))
+#    @user.update({$set: { mailChimp: { @leid, @email }}}) # hacky way to get around triggering post save
+    user = yield User.findById(@user.id)
+    console.log 'after any stuff', @user
+    @url = utils.getURL('/mail/webhook')
+    done()
+  
+  describe 'type "profile"', ->
+    it 'updates the user with new profile data', utils.wrap (done) ->
+      json = {
+        type: 'profile'
+        data: {
+          web_id: @leid
+          @email
+          merges: {
+            INTERESTS: 'Announcements, Adventurers, Artisans, Archmages'
+            LNAME: 'Smith'
+            FNAME: 'John'
+          }
+        }
+      }
+      [res, body] = yield request.postAsync({ @url, json })
+      console.log 'res', res.body
+      user = yield User.findById(@user.id)
+      console.log user
+      expect(user.get(''))
+      done()

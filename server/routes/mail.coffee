@@ -9,6 +9,8 @@ LevelSession = require '../models/LevelSession'
 Level = require '../models/Level'
 log = require 'winston'
 sendwithus = require '../sendwithus'
+wrap = require 'co-express'
+
 if config.isProduction and config.redis.host isnt 'localhost'
   lockManager = require '../commons/LockManager'
 
@@ -744,7 +746,7 @@ module.exports.sendNextStepsEmail = sendNextStepsEmail = (user, now, daysAgo) ->
 ### End Next Steps Email ###
 
 # TODO: Update webhooks!
-handleMailchimpWebHook = (req, res) ->
+handleMailchimpWebHook = wrap (req, res) ->
   post = req.body
 
   unless post.type in ['unsubscribe', 'profile']
@@ -755,19 +757,21 @@ handleMailchimpWebHook = (req, res) ->
     res.send 'No email provided'
     return res.end()
 
-  query = {'mailChimp.leid': post.data.web_id}
-  User.findOne query, (err, user) ->
-    return errors.serverError(res) if err
-    if not user
-      return errors.notFound(res)
+  user = yield User.findOne { 'mailChimp.leid': post.data.web_id }
+  if not user
+    user = yield User.findOne( { 'mailChimp.email': post.data.email })
+  
+  if not user
+    throw new errors.NotFound('MailChimp subscriber not found')
 
-    handleProfileUpdate(user, post) if post.type is 'profile'
-    handleUnsubscribe(user) if post.type is 'unsubscribe'
-
-    user.updatedMailChimp = true # so as not to echo back to mailchimp
-    user.save (err) ->
-      return errors.serverError(res) if err
-      res.end('Success')
+  if post.type is 'profile'
+    handleProfileUpdate(user, post)
+  else if post.type is 'unsubscribe'
+    handleUnsubscribe(user)
+    
+  user.updatedMailChimp = true # so as not to echo back to mailchimp
+  yield user.save()
+  res.end('Success')
 
 module.exports.handleProfileUpdate = handleProfileUpdate = (user, post) ->
   mailchimpSubs = post.data.merges.INTERESTS.split(', ')
